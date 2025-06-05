@@ -1,47 +1,103 @@
-import requests
-import base64
-import zlib
-import tempfile
-import subprocess
-import json
+import base64, json, subprocess, textwrap, uuid, zlib
+from pathlib import Path
 from urllib.parse import urlparse
 
-def extract_pobb_code(url: str) -> str:
-    parsed = urlparse(url)
-    return parsed.path.strip("/")
+import requests
 
-def fetch_raw_build(code: str) -> str:
-    raw_url = f"https://pobb.in/{code}/raw"
-    resp = requests.get(raw_url)
-    if resp.status_code != 200:
-        raise ValueError(f"Ошибка получения билда: {resp.status_code}")
-    return resp.text.strip()
 
-def decode_build_string(encoded: str) -> str:
-    padded = encoded + "==" if len(encoded) % 4 != 0 else encoded
-    raw_bytes = base64.urlsafe_b64decode(padded)
-    xml = zlib.decompress(raw_bytes).decode("utf-8")
-    return xml
+# ─────────────────────── pob helpers ────────────────────────
+def pobb_code(url: str) -> str:
+    return urlparse(url).path.lstrip("/")
 
-def process_build_url(url: str) -> list:
-    pobb_code = extract_pobb_code(url)
-    build_code = fetch_raw_build(pobb_code)
-    xml = decode_build_string(build_code)
 
-    with tempfile.NamedTemporaryFile("w+", suffix=".xml", delete=False) as xml_file:
-        xml_file.write(xml)
-        xml_file.flush()
+def pobb_raw(code: str) -> str:
+    r = requests.get(f"https://pobb.in/{code}/raw", timeout=10)
+    r.raise_for_status()
+    return r.text.strip()
 
-        result = subprocess.run(
-            ["luajit", "/app/pob_lua/extract_gems.lua", xml_file.name],
-            capture_output=True, text=True,
-            cwd="/pob/src"  # 👈 ключевой момент: запускаем из папки, где есть Launch.lua
-        )
 
-    if result.returncode != 0:
-        raise RuntimeError(f"LuaJIT error: {result.stderr.strip()}")
+def inflate(b64: str) -> str:
+    pad = b64 + "=" * (-len(b64) % 4)
+    return zlib.decompress(base64.urlsafe_b64decode(pad)).decode()
 
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Ошибка разбора JSON из Lua: {e}")
+
+# ───────────────────────── main entry ───────────────────────
+def process_build_url(pobb_url: str) -> list[dict]:
+    xml = inflate(pobb_raw(pobb_code(pobb_url)))
+
+    lua = textwrap.dedent(
+        f"""
+        -- run PoB headless (side-effects)
+        dofile("HeadlessWrapper.lua")
+        print("<<< INJECTION >>>")
+
+        -- find any global table that has loadBuildFromXML
+        local loaderTable
+        for k,v in pairs(_G) do
+          if type(v)=="table" and type(v.loadBuildFromXML)=="function" then
+            loaderTable = v
+            break
+          end
+        end
+        if not loaderTable then
+          io.stderr:write("no loaderTable\\n"); os.exit(1)
+        end
+
+        -- load build
+        loaderTable.loadBuildFromXML([=[{xml}]=], "Imported")
+
+        -- find mainObject inside that table (mainObject or main)
+        local mainObject = loaderTable.mainObject or loaderTable.main
+        if not mainObject then
+          io.stderr:write("no mainObject\\n"); os.exit(1)
+        end
+        mainObject:OnFrame()
+
+        local build = _G.build or (mainObject.main and mainObject.main.modes and mainObject.main.modes["BUILD"])
+        if not build then
+          io.stderr:write("no build table\\n"); os.exit(1)
+        end
+
+        local gems, dkjson = {{}}, require("dkjson")
+        for gi,grp in ipairs(build.skillsTab.socketGroupList or {{}}) do
+          for _,gem in ipairs(grp.gemList or {{}}) do
+            local ge = gem.grantedEffect or {{}}
+            table.insert(gems, {{
+              name    = ge.name or gem.nameSpec or "Unknown",
+              level   = gem.level   or 0,
+              quality = gem.quality or 0,
+              type    = (ge.support and "support" or "active"),
+              group   = gi
+            }})
+          end
+        end
+
+        print(dkjson.encode(gems))
+        os.exit()
+        """
+    )
+
+    tmp = Path(f"/tmp/pob_{uuid.uuid4().hex}.lua")
+    tmp.write_text(lua, "utf-8")
+
+    proc = subprocess.run(
+        ["luajit", str(tmp)],
+        cwd="/pob/src",
+        capture_output=True,
+        text=True,
+        timeout=40,
+    )
+
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or "PoB headless failed")
+
+    # последняя строка stdout, начинающаяся с { или [
+    json_line = ""
+    for ln in proc.stdout.splitlines():
+        ln = ln.strip()
+        if ln.startswith("{") or ln.startswith("["):
+            json_line = ln
+    if not json_line:
+        raise RuntimeError("No JSON in PoB output")
+
+    return json.loads(json_line)
