@@ -138,13 +138,6 @@ The wrapper code in this repository is MIT licensed (see `LICENSE`).
 
 ```
 
----
-
-### Commit summary suggestion
-
-```
-
-docs: add complete README with usage, API and troubleshooting
 
 ```
 ```
