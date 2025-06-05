@@ -13,11 +13,9 @@ f:close()
 -- Запускаем HeadlessWrapper
 dofile("HeadlessWrapper.lua")
 
--- Дожидаемся инициализации PoB
-while not mainObject do end
-
--- Загружаем билд через callback-функцию
-callbackTable.loadBuildFromXML(xml, "ImportedBuild")
+-- Загружаем билд напрямую
+mainObject.main:SetMode("BUILD", false, "", xml)
+mainObject:OnFrame()
 
 -- Собираем информацию о gem'ах
 local gems = {}
