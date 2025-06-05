@@ -36,6 +36,7 @@ def process_build_url(url: str) -> list:
         result = subprocess.run(
             ["luajit", "/app/pob_lua/extract_gems.lua", xml_file.name],
             capture_output=True, text=True
+            cwd="/pob/src"
         )
 
     if result.returncode != 0:
