@@ -18,7 +18,6 @@ def fetch_raw_build(code: str) -> str:
     return resp.text.strip()
 
 def decode_build_string(encoded: str) -> str:
-    # Add padding if needed
     padded = encoded + "==" if len(encoded) % 4 != 0 else encoded
     raw_bytes = base64.urlsafe_b64decode(padded)
     xml = zlib.decompress(raw_bytes).decode("utf-8")
@@ -35,8 +34,8 @@ def process_build_url(url: str) -> list:
 
         result = subprocess.run(
             ["luajit", "/app/pob_lua/extract_gems.lua", xml_file.name],
-            capture_output=True, text=True
-            cwd="/pob/src"
+            capture_output=True, text=True,
+            cwd="/pob/src"  # 👈 ключевой момент: запускаем из папки, где есть Launch.lua
         )
 
     if result.returncode != 0:
@@ -45,4 +44,4 @@ def process_build_url(url: str) -> list:
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Ошибка разбора JSON из Lua: {e}"
+        raise RuntimeError(f"Ошибка разбора JSON из Lua: {e}")
