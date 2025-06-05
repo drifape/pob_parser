@@ -46,3 +46,4 @@ def process_build_url(url: str) -> list:
         return json.loads(result.stdout)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Ошибка разбора JSON из Lua: {e}")
+        raise RuntimeError(f"Ошибка разбора JSON из Lua: {e}"
