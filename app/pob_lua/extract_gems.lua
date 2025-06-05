@@ -1,20 +1,29 @@
+-- Получаем путь к XML
 local xmlFilePath = arg[1]
 if not xmlFilePath then
     print("XML файл не передан")
     os.exit(1)
 end
 
+-- Чтение XML
 local f = io.open(xmlFilePath, "r")
 local xml = f:read("*a")
 f:close()
 
-dofile("/pob/src/HeadlessWrapper.lua")
-loadBuildFromXML(xml, "ImportedBuild")
+-- Запускаем HeadlessWrapper
+dofile("HeadlessWrapper.lua")
 
+-- Дожидаемся инициализации PoB
+while not mainObject do end
+
+-- Загружаем билд через callback-функцию
+callbackTable.loadBuildFromXML(xml, "ImportedBuild")
+
+-- Собираем информацию о gem'ах
 local gems = {}
-for groupIndex, socketGroup in ipairs(build.skillsTab.socketGroupList) do
+for groupIndex, socketGroup in ipairs(build.skillsTab.socketGroupList or {}) do
     local slot = socketGroup.slot or ""
-    for _, gem in ipairs(socketGroup.gemList) do
+    for _, gem in ipairs(socketGroup.gemList or {}) do
         local gemData = gem.grantedEffect or {}
         table.insert(gems, {
             name = gemData.name or gem.nameSpec or "Unknown",
@@ -27,5 +36,6 @@ for groupIndex, socketGroup in ipairs(build.skillsTab.socketGroupList) do
     end
 end
 
+-- Выводим JSON
 local json = require("dkjson")
 print(json.encode(gems, { indent = false }))
