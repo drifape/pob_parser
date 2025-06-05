@@ -10,7 +10,8 @@ class BuildRequest(BaseModel):
 @app.post("/parse_build")
 def parse_build(request: BuildRequest):
     try:
-        result = process_build_url(request.pobb_url)
+        # Приводим HttpUrl к обычной строке
+        result = process_build_url(str(request.pobb_url))
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
